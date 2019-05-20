@@ -474,6 +474,13 @@ text(0.1,65,'Where true effect size = 0,\n yaxis > 0 indicates false positive;\n
 abline(v=0) #Where true effect size = 0, value > 0 indicates false positive
 #text(bigtable2$gscanull~bigtable2$meanES,labels=bigtable2$nsnp,col=bigtable2$Ncolor,cex=.8) 
 #plot(bigtable2$gscanull~bigtable2$lm0,col=bigtable2$Ncolor,pch=bigtable2$snpshape)
+
+#To see how meanES relates to %significant, reorder bigtable2
+newdata <- bigtable2[order(bigtable2$Npats,bigtable2$meanES),]
+
+#alternative method of computing mean ES from r^2
+#newdata$altmeanES<-sqrt((newdata$nseff*newdata$eff_size^2)/newdata$nsnp)
+
 ```
 
 
