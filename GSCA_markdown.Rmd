@@ -53,8 +53,9 @@ mynperm=100 #for GSCA - probably need more than this but to test prog use 100 fo
 npop<-10000 #size of population to simulate
 n2sim<-3 #n phenos indexing latent pheno factor : nb phenotypes correlate with latent factor
 
-LDbase <- .75 #This is the highest correlation between adjacent SNPs - correl will decline with distance
-#original file had max LD of .9. Later I tried with reduced value of .75 - seems to give plausible values.
+LDbase <- .75 #This is an index that controls the correlation between adjacent SNPs - correl will decline with distance
+#original file had LDbase of .9. Later I tried with reduced value of .75 - seems to give plausible values.
+#Heatmap will allow you to visualise these
 
 phencorr<-.75 #correlation of 3 phenotypes with latent variable
 #with this setting, intercorrelation between phenotypes is around .56
@@ -529,6 +530,7 @@ We'll look at this first, just using the LM results. Let's compute mean ES.
 Twitter advice is to go for r (this reflects the regression slope, since standardized beta coefficient =  correlation of the predictor with the outcome). So we can average r across all SNPs in the analysis.
 
 ```{r meaneffsize}
+#This chunk needs correction - seems it thinks nsnp is a factor and this stops it computing ES.
 #since r is equivalent to standardized beta, we will average these
 bigtable2$meanES <-(bigtable2$nsnpeff*bigtable2$effsize)/bigtable2$nsnp
 #with baseR it is easiest just to create columns to code colour and shape of symbols in plot . There are better ways to do this!
