@@ -1,7 +1,7 @@
 ---
 title: "GSCApaper_markdown"
 author: "DVM Bishop"
-date: "29/05/2019"
+date: "31/05/2019"
 output: html_document
 ---
 
@@ -47,16 +47,16 @@ Because GSCA is very slow, did 100 runs for each combination (this takes several
 
 nrun<-100
 startrow<-1 #row of big summary to write to
-mynperm=1000 #for GSCA - probably need more than this but to test prog use 100 for speed
+mynperm=100 #for GSCA - probably need more than this but to test prog use 100 for speed; tends to give values pretty close to those obtained with 1000 permutations
 dogsca<-1
-npop<-10000 #size of population to simulate
-n2sim<-3 #n phenos indexing latent pheno factor : nb phenotypes correlate with latent factor
+npop<-10000 #size of population to simulate; on each run we sample from this population
+n2sim<-3 #n phenos indexing latent pheno factor 
 
 LDbase <- 0 #This is an index that controls the correlation between adjacent SNPs - correl will decline with distance
 #original file had LDbase of .9. Later I tried with reduced value of .75 - seems to give plausible values.
 #Heatmap will allow you to visualise these
 
-phencorr<-.75 #correlation of 3 phenotypes with latent variable
+phencorr<-.75 #intercorrelation of 3 phenotypes 
 #with this setting, intercorrelation between phenotypes is around .56
 
 #List of effectsizes to cycle through (multiplied by 10)
@@ -64,7 +64,7 @@ effsizelist<-c(1) #will be divided by 10 to give a correlation
 #(just given here as whole number to make easier to use in filename)
 
 #List of values to cycle through, specifies N SNPs with effect on phenotype
-nsnpefflist<-c(5,10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
+nsnpefflist<-c(10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
 
 #NB we use value of zero for testing false positive rate (alternative would be to set effect size to zero)
 
@@ -100,20 +100,19 @@ colnames(bigsummary)<-c('run','cluster','nsnp','ngenes','nsnpeff','effsize','nsu
 
 We start by simulating a large population with the desired correlational structure. 
 
-We have 3 language phenotypes, which are indicators of a latent factor. The correlation of each of these with the latent factor is specified above as phencorr. 
+We have 3 language phenotypes, which are intercorrelated at level phencorr.
+(This differs from previous version which had a latent phenotype)
 
 We create a correlation matrix for the desired N SNPs. Initially this is just a matrix of zeros with ones on diagonal, but to have more realistic data, we can simulate a degree of linkage disequilibrium, i.e. adjacent SNPs are correlated.
 The variable LDbase is used to control this - a value of .75 gives realistic-looking values. 
 
 Default assumption is no correlation of SNPs with latent factor; then specified number of SNPs have effect added by changing their correlation with latent value to equal the specific effect size.
 
-Initially, the SNP values are just simulated together with the latent factor using mvrnorm to give a matrix of z-scores. This matrix will have the SNPs correlated according to the setting of LDbase, and individual SNPs will also be correlated with the latent factor, with level of effect size, as specified above.
+Initially, the SNP values are just simulated together using mvrnorm to give a matrix of z-scores. This matrix will have the SNPs correlated according to the setting of LDbase, and individual SNPs will also be correlated with the phenotypes, with level of effect size, as specified above.
 
 We then need to adjust the SNPs scores so that they correspond to values of 0, 1 or 2 - i.e. N major alleles. We select a random value between .25 and .5 for minor allele frequency for each SNP, and from this we can compute the proportion of each genotype in the population.  We allocate a score of 0, 1 or 2, depending on the z-score for the simulated data (using normal distribution of probabilities). E.g. if we expected 50% of cases to have AA genotype (equivalent to SNP score of 2) we would allocate a score of 2 when the z-score was greater than zero (p = .5). 
 
-Finally, we need to simulate z-scores for observed phenotype variables. We simply simulate these as scores correlated with the latent variable by the specified amount (phencorr) - this is done using a formula that treats each score as the sum of the latent variable plus an error term. 
-
-The end result of this step is a dataframe consisting of a row for each simulated person in the population (currently set at 10,000 cases), which contains values of 0, 1 or 2 for each SNP, value for a latent phenotype variable, and values for 3 observed phenotypes. This should have the desired correlation structure - which can be observed in a heatmap using  ggcorrplot(cor(mydata)).
+The end result of this step is a dataframe consisting of a row for each simulated person in the population (currently set at 10,000 cases), which contains values of 0, 1 or 2 for each SNP, and values for 3 observed phenotypes. This should have the desired correlation structure - which can be observed in a heatmap using  ggcorrplot(cor(mydata)).
 
 The simulated data is saved so it can be used to compare different analyses.
 
@@ -127,8 +126,8 @@ makedata <- function(nsnp,ngenes,effsize,nsnpeff,LDbase){
     maf<-runif(nsnp,.25,.5) #minor allele freq for each SNP; set to random value from .25 to .5
     
     #Setup a dataframe to hold to hold simulated data.
-    mydata<-data.frame(matrix(nrow=npop,ncol=(4+sum(nsnp)))) #set to hold npop cases - we will sample from these for each run
-    #We have +4 to allow for additional columns for (a)latent phenotype and (b) 3 component variables
+    mydata<-data.frame(matrix(nrow=npop,ncol=(3+sum(nsnp)))) #set to hold npop cases - we will sample from these for each run
+    #We have +3 to allow for additional columns for  3 phenotype variables
     #SNP values will be 0, 1 or 2, but we start with random normal numbers
     
     #-----------------------------------------------------------------
@@ -139,11 +138,13 @@ makedata <- function(nsnp,ngenes,effsize,nsnpeff,LDbase){
     # (where sequence order is proxy for distance)
     
     
-    h <-nsnp+1 #an additional column used for latent variable
+    h <-nsnp+3 #additional columns used for phenotypes 
+    phenrange<-(nsnp+1):(nsnp+3) #range of cols for phenotypes
     mymean<-rep(0,h) #vector of means to use in mvrnorm function
     mycorr<-0 #default is uncorrelated
     mycov2<-matrix(mycorr,nrow=h,ncol=h) #cov matrix for mvrnorm
-    
+     mycov2[(nsnp+1):(nsnp+3),(nsnp+1):(nsnp+3)]<-phencorr #intercorrelation between phenotypes
+   
     diag(mycov2)<-rep(1,h) #ones on diagonal of cov matrix
     gene_break<-floor(nsnp/ngenes) #new gene starts after every gene-break value
 
@@ -175,28 +176,20 @@ makedata <- function(nsnp,ngenes,effsize,nsnpeff,LDbase){
       myrange<-(1+(g-1)*nsnp_g):(g*nsnp_g) #range of indices for SNPs in this gene
       snpeff_pos<-c(snpeff_pos,sample(myrange,nsnpeff_g,replace=F)) #randomly selected SNPs in this range
     }
-  
-    mycov2[snpeff_pos,h]<-effsize #for SNPs with effect, add effect size in cov matrix
-    mycov2[h,snpeff_pos]<-effsize
-    if(matrixcalc::is.positive.definite(mycov2)==FALSE)
+    
+    mycov2[snpeff_pos,phenrange]<-effsize #for SNPs with effect, add effect size in cov matrix
+    mycov2[phenrange,snpeff_pos]<-effsize
+    if(matrixcalc::is.positive.definite(mycov2)==FALSE) #ensure matrix is positive definite
     {mycov2<-Matrix::nearPD(mycov2,keepDiag=TRUE)$mat}
     
     #create simulated data for SNPs and latent phenotype only
     mymean<-rep(0,h)
     mydata=data.frame(mvrnorm(n = npop, mymean, mycov2))
-    colnames(mydata)[h]<-c("latentpheno")
-    #################################################
+      #################################################
     
     colnames(mydata)[1:nsnp]<-snpnames
-    
-    #values for phenotype now added
-    #created as correlated with latent: r = phencorr
-    #formula creates correlated variables as weighted sum of latent and random error
-    mydata$nonword<-phencorr*mydata$latent+sqrt(1-phencorr^2)*rnorm(nrow(mydata))
-    mydata$elang<-phencorr*mydata$latent+sqrt(1-phencorr^2)*rnorm(nrow(mydata))
-    mydata$rlang<-phencorr*mydata$latent+sqrt(1-phencorr^2)*rnorm(nrow(mydata))
-    
-    
+    colnames(mydata)[phenrange]<-c('nonword','elang','rlang')
+  
     #-------------------------------------------------------------------------
     #Convert gene scores to integers: 0-2 for N SNPs with major allele
     
@@ -224,6 +217,7 @@ makedata <- function(nsnp,ngenes,effsize,nsnpeff,LDbase){
 
 
 ```{r adddata}
+
 #ensure makedata function is loaded before running this chunk
  mycondition<-0 #initialise
  tic() #start timer
@@ -233,7 +227,6 @@ makedata <- function(nsnp,ngenes,effsize,nsnpeff,LDbase){
          for (ngenes in ngenelist){
           nsnp<-nsnpg*ngenes #compatibility with previous version where nsnp was all in analysis summed over genes
        
- #   nsnp=20;effsize=.1;nsnpeff=5;ngenes=1 #for testing function without loop - comment this out
 
       mydata<-makedata(nsnp,ngenes,effsize,nsnpeff,LDbase)
        print(paste('nsnp',nsnp,'ngenes',ngenes,'effsize',effsize,'nsnpeff',nsnpeff))
@@ -269,7 +262,7 @@ if (dogsca == 1){ #set to zero to skip this chunk
 print(paste('nsnp',nsnp,'ngenes',ngenes,'effsize',effsize,'nsnpeff',nsnpeff))
    
        dataname<-paste0('simulated_data//rawsim_nsnp',nsnp,'_ngene',ngenes,'_effsize',effsize,'_nsnpeff',nsnpeff,'_phencorr',phencorr,'_LDbase',LDbase,'.csv')
-      myread<-data.frame(read_csv(dataname))
+      mydata<-data.frame(read_csv(dataname))
   #   nruns <-1 #have to limit N runs so that simulation runs in reasonable time
  
       for (myrun in 1:nrun){ #take new sample on each run
@@ -278,8 +271,7 @@ print(paste('nsnp',nsnp,'ngenes',ngenes,'effsize',effsize,'nsnpeff',nsnpeff))
        #do GSCA - but just read in prior results unless you can wait many days!
     
       myrows<-sample(npop,nsub) 
-      mysample<-myread[myrows,-(nsnp+1)] #skip latent phenotype
-      
+       mysample<-mydata[myrows,]
       #use ASGSCA to analyse
       snprange<-1:nsnp
       phenrange<-((nsnp+1):(nsnp+3))
@@ -416,14 +408,7 @@ aggregate(temp$sig.p.cor, by=list(temp$nsub,temp$nsnp,temp$nsnpeff),FUN=mean)
 
 ```
 
-```{r paulcompare}
-#Reading previously computed data and selecting for comparison
-  paultable<-read_csv('PT_simulation_results_MC_adj_formatted-1.csv')
-paulcompare<-filter(paultable,ngenes==1,cluster==0,nsnp<100)
-paulcompare<-dplyr::select(paulcompare,-c(nsig2,nsig3,nsig4,cluster))
-paulcompare<-dfOrder(paulcompare,c(7,1,2,4))
-write_csv(paulcompare,'paulcompare.csv')
-```
+
 
 ```{r readgrouped}
 
@@ -458,18 +443,17 @@ dolm<-function(myread,myruns,myN){
    
     myrows<-sample(npop,myN) #from the big population file, select myN rows at random
     mysample<-myread[myrows,] #subsample for analysis with myN rows
-
     #For each phenotype measure, we are just going to search for the largest correlation with a SNP and test that for significance
            mybonfp<-.05/nsnp #Bonferroni corrected p-value
-          for (j in (nsnp+2):(nsnp+4)){ #skip latent phenotype
-            myposresults[r,(j-nsnp-1)]<-0 #initialise matrix to hold sigs
+          for (j in (nsnp+1):(nsnp+3)){ # phenotypes
+            myposresults[r,(j-nsnp)]<-0 #initialise matrix to hold sigs
             allcor<-cor(mysample) #correlation matrix for all SNPs and phenotypes
             maxr<-max(abs(allcor[1:nsnp,j])) 
             w<-which(abs(allcor[,j])==maxr) #finds the SNP with highest correl for phenotype j
             myfit<-lm(mysample[,j]~mysample[,w]) 
             myp<-summary(myfit)[[4]][8] #gives associated pvalue (4 and 8 just happen to be the indices where p-value recorded in summary)
             if (myp<mybonfp){
-              myposresults[r,(j-nsnp-1)]<-1 #myposresults will be matrix
+              myposresults[r,(j-nsnp)]<-1 #myposresults will be matrix
               #with row for each run, and 3 columns that will show 1 if there was a
               #significant association with a SNP and that phenotype on that run.
             }
