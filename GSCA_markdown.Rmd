@@ -60,20 +60,20 @@ phencorr<-.75 #intercorrelation of 3 phenotypes
 #with this setting, intercorrelation between phenotypes is around .56
 
 #List of effectsizes to cycle through (multiplied by 10)
-effsizelist<-c(1) #will be divided by 10 to give a correlation
+effsizelist<-c(1,2,4) #will be divided by 10 to give a correlation
 #(just given here as whole number to make easier to use in filename)
 
 #List of values to cycle through, specifies N SNPs with effect on phenotype
-nsnpefflist<-c(10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
+nsnpefflist<-c(5,10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
 
 #NB we use value of zero for testing false positive rate (alternative would be to set effect size to zero)
 
 ngenelist<-c(1)  #for comparison with lm we just look at case with single gene
 #Script should work with larger N genes, but this has not yet been tested with current rmd file (though it was OK in earlier R script) 
 
-nsublist<-c(100) #number of cases in the simulation - simulation will cycle through all values listed here
+nsublist<-c(100,500) #number of cases in the simulation - simulation will cycle through all values listed here
 
-nsnp_per_gene<-c(20) #N SNPs that are tested - only a subset of these will have an effect on the phenotype - defined by nsnpefflist. If just one gene, then these correspond to all SNPs in the simulation.
+nsnp_per_gene<-c(20,40) #N SNPs that are tested - only a subset of these will have an effect on the phenotype - defined by nsnpefflist. If just one gene, then these correspond to all SNPs in the simulation.
 
 #make name for this big summary file - aim to specify all variable parameters in the name.
 #will be saved in a directory called 'simulated data'
