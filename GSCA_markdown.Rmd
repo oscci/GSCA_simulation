@@ -52,7 +52,7 @@ dogsca<-1
 npop<-10000 #size of population to simulate; on each run we sample from this population
 n2sim<-3 #n phenos indexing latent pheno factor 
 
-LDbase <- 0 #This is an index that controls the correlation between adjacent SNPs - correl will decline with distance
+LDbase <- .75 #This is an index that controls the correlation between adjacent SNPs - correl will decline with distance
 #original file had LDbase of .9. Later I tried with reduced value of .75 - seems to give plausible values.
 #Heatmap will allow you to visualise these
 
@@ -64,7 +64,7 @@ effsizelist<-c(1,2,4) #will be divided by 10 to give a correlation
 #(just given here as whole number to make easier to use in filename)
 
 #List of values to cycle through, specifies N SNPs with effect on phenotype
-nsnpefflist<-c(5,10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
+nsnpefflist<-c(0,5,10) #N of SNPs with an effect on phenotype (NB in some versions of script we specify a proportion - but in this version we use N. Note that for a given nsnp, proportion will decrease as N SNPs increases, e.g. 10/100 SNPs is only 10% with an effect, where 10/20 SNPs is 50%).
 
 #NB we use value of zero for testing false positive rate (alternative would be to set effect size to zero)
 
@@ -383,14 +383,14 @@ groupedsummary_new<-by_N_neff_nsub %>% summarise(power = mean(sig.p.cor))
 
 groupedsummary_new$nsnpeffplot<-groupedsummary_new$nsnpeff+groupedsummary_new$ngenes/100-.02
 
-groupedsummary_new$nsnp<-as.factor(groupedsummary_new$nsnp)
+groupedsummary_new$nsnpfac<-as.factor(groupedsummary_new$nsnp)
 groupedsummary_new$ngenes<-as.factor(groupedsummary_new$ngenes)
 groupedsummary_new$nsub<-as.factor(groupedsummary_new$nsub)
 groupedsummary_new$gene<-as.factor(groupedsummary_new$gene)
 
 
 
-ggplot(groupedsummary_new,aes(x=nsnpeffplot,y=power,colour=ngenes,shape=nsub))+geom_point()+geom_line(aes(linetype=gene))+facet_grid(nsnp~effsize)+theme_bw()+theme(legend.position = "bottom")
+ggplot(groupedsummary_new,aes(x=nsnpeffplot,y=power,colour=ngenes,shape=nsub))+geom_point()+geom_line(aes(linetype=gene))+facet_grid(nsnpfac~effsize)+theme_bw()+theme(legend.position = "bottom")
 
 bigname2<-paste0('grp_',bignamebase,'.csv')
 
@@ -536,8 +536,8 @@ legend(.1, 35, legend=c("nsnp=20", "nsnp=40","nsnp=100"),
       pch=c(15,16,17), cex=0.8)
 abline(v=0) #Where true effect size = 0, value > 0 indicates false positive
 #now do comparison with GSCA
-bigtable2$gscanull<-100-bigtable2$nsig1
-plot((100-bigtable2$gscanull)~bigtable2$meanES,ylim=c(0,100),col=bigtable2$Ncolor,pch=bigtable2$snpshape,xlab='Mean Effect size',ylab='% significant runs',main='GSCA')
+
+plot((bigtable2$power*100)~bigtable2$meanES,ylim=c(0,100),col=bigtable2$Ncolor,pch=bigtable2$snpshape,xlab='Mean Effect size',ylab='% significant runs',main='GSCA')
 legend(.1, 55, legend=c("N=100", "N=500"),
        col=c(1,2), lty=c(1,1), cex=0.8)
 legend(.1, 35, legend=c("nsnp=20", "nsnp=40","nsnp=100"),
@@ -547,9 +547,7 @@ abline(v=0) #Where true effect size = 0, value > 0 indicates false positive
 #text(bigtable2$gscanull~bigtable2$meanES,labels=bigtable2$nsnp,col=bigtable2$Ncolor,cex=.8) 
 #plot(bigtable2$gscanull~bigtable2$lm0,col=bigtable2$Ncolor,pch=bigtable2$snpshape)
 
-#To see how meanES relates to %significant, reorder bigtable2
-newdata <- bigtable2[order(bigtable2$Npats,bigtable2$meanES),]
-
+plot(bigtable2$lm.any,bigtable2$power*100)
 #alternative method of computing mean ES from r^2
 #newdata$altmeanES<-sqrt((newdata$nseff*newdata$eff_size^2)/newdata$nsnp)
 
