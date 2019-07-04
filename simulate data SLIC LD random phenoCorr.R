@@ -117,12 +117,23 @@ gsca_sim_multigene3<-function(nsnp,nsnpeff,ngenes=1,nsub=120,ncases=100000,gpcor
     if(!nsnpeff==0){
       if(cluster==0){snpeff_pos<-sample(1:nsnp,nsnpeff,replace=F)} else {snpeff_pos<-c((nsnp-(nsnpeff-1)):nsnp)}
       
-      mycov_PT[snpeff_pos,j] <- gpcov*ifelse(rbinom(1,1,c(0.5,0.5))==1,-1,1)
+      mycov_PT[snpeff_pos,j] <- gpcov#*ifelse(rbinom(1,1,c(0.5,0.5))==1,-1,1)
       mycov_PT[j,snpeff_pos] <- t(mycov_PT[snpeff_pos,j])
     }
   }
   
   mycov<-mycov_PT
+  
+  for(i in (nsnp+1):(nsnp+n2sim))
+  {
+    for(j in 1:nsnp)
+    {
+      mycov[i,j] <- ifelse(rbinom(1,1,prob=0.5)==1,mycov[i,j],(-1*mycov[i,j]))
+      mycov[j,i] <- ifelse(rbinom(1,1,prob=0.5)==1,mycov[j,i],(-1*mycov[j,i]))
+    }
+  }
+  
+  mycov[upper.tri(mycov)] <- t(mycov)[upper.tri(mycov)]
   
   diag(mycov)<-rep(1,dim(mycov)[1])
   #################################################
