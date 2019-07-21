@@ -1,0 +1,403 @@
+---
+title: "PLINK simulations"
+author: "DVM Bishop"
+date: "20 July 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(doBy)
+library(tidyr)
+require(tidyverse)
+require(MASS)
+require(stats)
+library(doSNOW)
+library(foreach)
+library(ASGSCA) #for GSCA
+library(matrixcalc)
+#set.seed(1981) #uncomment to get reproducible results
+#set.seed(Sys.time(),intern=TRUE) #?this gives error message, unused argument intern=TRUE
+options(scipen = 999) #turn off scientific notation
+```
+
+## Background
+This is Markdown version of:  
+'simulate data PLINK random LD random phenoCorr.R' by Paul Thompson, downloaded from OSF on 20th July 2019.
+
+This version breaks the original script into smaller chunks, with more explanation in between.
+
+The goal is to look at power of conventional PLINK-style association analysis with the kinds of simulated data that we used to evaluate GSCA. This will allow us to compare the power of the two methods.
+
+Background on PLINK can be found here:
+http://www.stat.purdue.edu/bigtap/online/docs/simple-association-test.html
+Multiple single regressions are fitted, then the p-value for parameters are extracted, with correction for the number of tests conducted.
+Covariate adjustment is possible, but we do not use this in this analysis
+
+## Read in SLIC data
+This is only needed if using correlations between SNPs from the SLIC dataset.
+In the simulation, we can either use this obtained correlation matrix, or take a random set of correlations with similar distribution.
+
+Data is read in for imputed and original SNPs, refdat file is created, allocating SNPs to the 4 genes.
+
+```{r readdata}
+#Need to set address depending on whether Paul or Dorothy is running the analysis
+pauladdress<-'/Users/paulthompson/Dropbox/project SCT analysis/GSCA validation/'
+dorothyaddress<-'~/Dropbox/ERCAdvanced/project SCT analysis/GSCA validation/'
+myaddress<-dorothyaddress #switch if necessary for Paul
+#Read in dataset used for GSCA analysis
+didat<-read.table(paste0(myaddress,'SLICmergedPROcounttest.txt'),header=TRUE,stringsAsFactors=FALSE)
+
+#Gene 1 - rs10255943 to rs2396765 (13 SNPs) foxp2
+#Gene 2 - rs10271363 to rs17170742, 23 SNPs cntnap2
+#Gene 3 - rs16957277 to rs16957385, 7 SNPs (edited)
+#Gene 4 - rs11149652 to rs4782962, 18 SNPs atp2c2
+
+#now read in 2nd dataset with more SNPs - this is the version with imputed data
+didat2<-read.table(paste0(myaddress,'GSCA_SLIC_paul.txt'),header=TRUE,stringsAsFactors=FALSE)
+
+myrow<-intersect(didat$ID,didat2$IND ) #identify case IDs common to both files
+
+alldat<-dplyr::filter(didat,ID%in%myrow)
+alldat2<-dplyr::filter(didat2,IND%in%myrow)
+#check these are in the same order, so can combine with cbind
+mycheck<-alldat$ID==alldat2$IND
+w<-length(which(mycheck==TRUE))
+print(paste0(w,' of ',nrow(alldat),' rows agree'))
+#merge the columns from the two datasets, after excluding cols 1 and 2 (ID and gender)
+#and the last 3 columns (which are the 3 language phenotypes) from alldat
+#Also exclude cols 1-4 for alldat2 (FID, IID, IND and GENDER) and last 3 cols for phenotypes
+alldat<-cbind(alldat[3:63],alldat2[5:292]) #this now is a file with just the SNP data from SLIC
+#The first 60 cols are original SNPs, and the remainder are imputed.
+
+bigtab<-cor(alldat,use='pairwise.complete.obs') #correlations between SNPs
+```
+# Main simulation function
+
+The function takes the following parameters
+nsnp: number of SNPs
+nsnpeff: number of SNPs with an effect on the phenotype
+ngenes: the SNPS can be subdivided into genes - this is a hangover from previous: here we just use 1 gene
+
+nsub: number of subjects (probands)
+ncases: number of cases in the population
+effsize: genotype-phenotype correlation, i.e. effect size for those SNPs with an effect (this is renamed: was gpcorr in original script)
+npheno: n phenotypes (renamed: was n2sim in original script)
+phenCorr: correlation between phenotype measures (set as same for all)
+
+The defaults for some variables are given in the function definition, but will be overridden by user-specified values
+
+```{r simdata}
+simulatedata<-function(nsnp,nsnpeff,ngenes=1,nsub=100,ncases=100000,effsize,npheno,plotter=TRUE,phenCorr,saveraw=TRUE,mydatafile)
+{
+    #Setup a dataframe to hold the population simulated data.
+  mydata<-data.frame(matrix(nrow=ncases,ncol=(3+nsnp))) #include extra columns for the 3 phenotypes
+
+
+
+  #set the correlation between genotype and phenotypes (i.e. effect size)
+  gpcov<-effsize
+  
+  snpnames<-paste0('snp', 1:nsnp)
+  maf<-runif(nsnp,.25,.5) #minor allele freq set to random uniform value from .25 to .5
+  
+  #SNP values are 0, 1 or 2, but we start simulating these by generating random normal numbers
+  
+  
+  mymean<-rep(0,nsnp) #vector of means to use in mvrnorm function
+
+  MyRandCorrMat<-function(nsnp) #function to generate random correlations
+  {
+ 
+    #rbeta generates random sample from a beta distribution, which is suitable for probabilities
+    R <- matrix(rbeta(nsnp^2,.23,1.23), ncol=nsnp)  #generate matrix of probabilities
+    R <- (R * lower.tri(R)) + t(R * lower.tri(R)) #make symmetric
+    diag(R) <- 1 #put ones on diagonal
+    return(R)
+  }
+  
+  mycov2 <- MyRandCorrMat(nsnp) #matrix of covariances between SNPs
+  
+
+  #################################################
+  #Now we will extend the covariance matrix to include the phenotypes
+  allcov<-matrix(0,nrow=nsnp+npheno,ncol=nsnp+npheno) #initialise matrix that will include phenotypes
+  allcov[1:nsnp,1:nsnp]<-mycov2
+  m<-diag(npheno)
+  pheno_mat<-m[lower.tri(m)|upper.tri(m)]<-phenCorr
+  allcov[(nsnp+1):(nsnp+npheno),(nsnp+1):(nsnp+npheno)]<-pheno_mat
+  
+  if(nsnpeff>0){ #when nsnpeff is zero, all phenotype effects are null.
+    #We use that condition to estimate false positive rate
+    
+    #Otherwise, when at least one SNP has true effect, we need to add this to the matrix
+  
+    #we can select SNPs at random, as below.(This has changed from prior script!!)
+    snpeff_pos<-sample(nsnp,nsnpeff)
+   
+    allcov[snpeff_pos,(nsnp+1):(nsnp+npheno)] <- effsize
+
+    allcov[(nsnp+1):(nsnp+npheno),snpeff_pos] <- t(allcov[snpeff_pos,(nsnp+1):(nsnp+npheno)])
+  }
+
+  diag(allcov)<-rep(1,dim(allcov)[1])
+  #We now have the covariance matrix, allcov, that specifies correlations between SNPs and 
+  #between SNPs and phenotypes
+  #-------------------------------------------------------------------------#
+  
+  #We adjust the covariance matrix so that correlations are positive or negative at random
+  for(i in 1:nsnp)
+  {
+    for(j in 1:nsnp)
+    {
+      allcov[i,j] <- ifelse(rbinom(1,1,prob=0.5)==1,allcov[i,j],(-1*allcov[i,j]))
+    }
+  }
+  
+  for(i in (nsnp+1):(nsnp+npheno))
+  {
+    for(j in 1:nsnp)
+    {
+      allcov[i,j] <- ifelse(rbinom(1,1,prob=0.5)==1,allcov[i,j],(-1*allcov[i,j]))
+      allcov[j,i] <- ifelse(rbinom(1,1,prob=0.5)==1,allcov[j,i],(-1*allcov[j,i]))
+    }
+  }
+  
+  
+  allcov[upper.tri(allcov)] <- t(allcov)[upper.tri(allcov)]
+  
+  diag(allcov)<-rep(1,dim(allcov)[1])
+  
+  #-------------------------------------------------------------------------#
+  
+  #################################################
+  
+  #Simulation may give 'not positive definite' matrix, so need to adjust if so
+  if(matrixcalc::is.positive.definite(allcov)==FALSE)
+  {allcov<-Matrix::nearPD(allcov,keepDiag=TRUE)$mat}
+  
+  #Now use mvrnorm to generate random normal data based on covariance structure from allcov
+  mymean<-rep(0,dim(allcov)[1])
+  mydata=mvrnorm(n = ncases, mymean, allcov)
+  
+  mydata<-as.data.frame(mydata)
+  
+  colnames(mydata)[1:nsnp]<-snpnames
+  colnames(mydata)[(nsnp+1):(nsnp+3)]<-c('NwdRepPheno','LangPheno','NeurodevPheno')
+  
+  #-------------------------------------------------------------------------
+  #Convert gene scores to integers: 0-2 for autosomal
+  
+  firstcol<-1
+  lastcol<-nsnp
+  p<-c(0,0,0) #initialise a vector to hold p values for different N alleles
+  for (i in 1:nsnp){
+    p[1]<-(1-maf[i])^2
+    p[2]<-2*(1-maf[i])*maf[i]
+    p[3]<-maf[i]^2
+    
+    #now use p-values to assign z-score cutoffs that convert to 0,1,2 or 3 minor alleles
+    temp<-mydata[,i]
+    w<-which(temp<qnorm(p[1]))
+    mydata[w,i]<-0
+    w<-which(temp>qnorm(p[1]))
+    mydata[w,i]<-1
+    w<-which(temp>qnorm(p[2]+p[1]))
+    mydata[w,i]<-2
+    
+  }
+  
+  myr<-cor(mydata) #to check you have desired correlation structure, View(myr)
+  if(saveraw==TRUE){
+  write.csv(mydata,mydatafile,row.names=FALSE) #save the simulated raw data
+  }
+  #----------------------------------------------------------------------
+  #We can plot heatmap to check correlational structure looks right
+  if(plotter==TRUE){
+
+    
+    cor.data<-as.matrix(myr)
+    cor.data[lower.tri(cor.data)] <- NA
+    
+    cor_tri_N <- as.data.frame(cor.data) %>% 
+      mutate(Var1 = factor(row.names(.), levels=row.names(.))) %>% 
+      gather(key = Var2, value = value, -Var1, na.rm = TRUE, factor_key = TRUE) 
+    
+    
+    g1<-ggplot(data = cor_tri_N, aes(Var2, Var1, fill = value)) + 
+      geom_tile()+scale_fill_gradient2(low = "blue",mid="white", high = "red")+theme_bw()+ theme(axis.text.x = element_text(angle = 90, hjust = 1),panel.grid.major = element_blank(), panel.grid.minor = element_blank(),axis.title = element_blank(),legend.title=element_blank(),text=element_text(size=14))+geom_hline(yintercept = (nsnp+0.5),colour="grey")+geom_vline(xintercept = (nsnp+0.5),colour="grey")
+    
+    print(g1)
+    ggsave(paste0(myaddress,"July2019/Corr_plots/plot_Random_LD_pheno_PT_random_pattern_SNPs_PLINK_",cb,".pdf"))
+    
+  }
+  return(mydata)
+} #end function for creating dataset
+```
+
+## Running through the simulation, with repeated sampling 
+We have created the population of values.
+Now we will generate multiple runs where we select a sample from that population.
+We first specify the full set of conditions to test, then generate dataset for each combination.  
+For each data, we take nrun samples and use these to compute p-values for each SNP relative to each phenotype on each run, using simple regression.  
+
+There are various ways we can compute power, i.e. % 'significant' runs.  
+Note that when true effect is zero, this measure of 'power' is in fact the false positive rate.
+
+Note that in this field, it seems customary to declare an association as significant if ANY of a set of SNPs reaches a significance threshold on ANY of a set of phenotypes. We will follow that approach, adopting different methods for controlling for multiple comparisons.
+
+We will compare the following:
+
+## Method A
+   
+Bonferroni correction to adjust alpha for the N SNPs, but no correction for N phenotypes.
+Thus if ANY phenotype meets Bonferroni-corrected alpha level, treat the run as 'significant'.
+This will have an inflated false positive rate, especially if the phenotypes are uncorrelated. For strongly correlated phenotypes, it is less of a problem.
+NB Any sequential method, such as Holm test, will give the same result as this, as it searches first for the most extreme p-value.
+In effect can compute this by just finding the smallest p-value and seeing if it is lower than the corrected alpha. If so, then conclude there is association.
+
+## Method B  
+
+Adopt Bonferroni correction for the total N comparisons, which is  
+   nsnps x nphenos.
+With correlated phenotypes this could be too stringent.
+In following script, this is referred to as Bonffull (ie full Bonferroni correcting for all comparisons)
+   
+We did consider also using Benjamini Yekutieli test to adjust for the nsnp x N phenotypes. However, I think that, given the focus on finding *any* p-value < alpha, this would give same result as method B, so it is not considered further.
+   
+
+
+```{r checkpower}
+#Create all the combinations of conditions to be used
+combos_plink<-expand.grid(nsnpeff=c(0,5,10),nsnp=c(20,40),ngenes=1,nsub=c(100,500),effsize=c(0.1,.15,.2),PhenoCorr=c(0,0.5,.75))
+
+#combos_plink<-expand.grid(nsnpeff=c(5,10),nsnp=c(20),ngenes=1,nsub=c(100),effsize=c(.2),PhenoCorr=c(0.5)) #shorter version for testing
+
+#Make data frame for the combination
+#See below for definitions of last 2 columns: different kinds of correction
+test_combos<-data.frame(combos_plink,Bonferroni=rep(NA,length(combos_plink[,1])),Bonffull=rep(NA,length(combos_plink[,1])))
+
+for(cb in 1:length(combos_plink[,1]))
+{
+  
+  #print(cb)
+    nrun <- 1000 #N runs to simulate
+                           nsnp=combos_plink[cb,2]
+                           nsnpeff=combos_plink[cb,1]
+                           ngenes=combos_plink[cb,3]
+                           nsub=combos_plink[cb,4]
+                           ncases=50000
+                           effsize=combos_plink[cb,5]
+                            npheno=3
+                           phenCorr=combos_plink[cb,6]
+  #set up filename for simulated data; this sits in folder July2019/simulations_results
+  mydatafile <- paste0(myaddress,'July2019/simulations_results/PLINKdata_Nsnp',nsnp,'_Neff',nsnpeff,'_effsize',effsize,'_Phencorr',phenCorr,'.csv')
+  
+  if (file.exists(mydatafile)){
+    mybigdata<-read.csv(mydatafile)
+  }
+  else{
+    mybigdata<-simulatedata(nsnp,
+                           nsnpeff,
+                           ngenes,
+                           nsub,
+                           ncases,
+                           effsize,
+                            npheno,
+                           plotter=TRUE,
+                           phenCorr,
+                           saveraw=TRUE,
+                           mydatafile
+                           )
+  }
+#We now repeatedly sample for nrun iterations and compute p-values
+   SNP_p<-data.frame(matrix(0,nrow=nsnp,ncol=npheno)) #df to hold p-values for Nsnps [rows] x 3 phenotypes
+   colnames(SNP_p)<-c('phen1','phen2','phen3')
+  
+    myalpha<-.05
+    nA<-nB<-0 #initialise counter
+    
+#Both methods scan the snps for any p-value below adjusted alpha
+
+    for(myn in 1:nrun)
+     {
+    myrows<-sample(ncases,nsub) #sample of row numbers for sampling equal to N=nsub
+    mysample<-mybigdata[myrows,] #take sample of size Nsub from large simulated data.
+    
+    #PLINK - type regressions
+    
+    x<-mysample[,1:nsnp] #extract the data for the SNPs as predictors variables.
+    y<-mysample[,(nsnp+1):(nsnp+3)] #extract the data for the phenotypes as dependent variable.
+     
+    #loop for each phenotype (v slow; Paul's function would be better here!)
+    for(i in 1:npheno)
+    {
+      for (s in 1:nsnp){
+        SNP_p[s,i]<-summary(lm(y[,i]~x[,s]))$coefficients[2,4]
+      }
+    }
+    vA<-length(which(SNP_p<(myalpha/nsnp))) 
+    vB<-length(which(SNP_p<(myalpha/(nsnp*npheno))))#
+   if(vA>0){nA<-nA+1} #increase nA if any SNP has sig result
+   if(vB>0){nB<-nB+1} #increase nB if any SNP has sig result
+  }
+
+  test_combos$Bonferroni[cb]<-nA/nrun
+   test_combos$Bonffull[cb]<-nB/nrun
+  
+}
+
+writeaddress<-paste0(myaddress,'July2019/test_combos_regression_plink_rep',nrun,'.csv')
+  
+write.csv(test_combos,writeaddress,row.names=FALSE)
+
+```
+
+Now plot the results from combos. 
+Can either plot results from Bonferroni corrected (just correcting for N SNPs), or for Bonffull (corrects for N SNPs x N phenotypes, so more stringent). I have manually altered which of these is selected in the my_summary_new function, and also altered the saved filenames for these 2 options.
+
+I think we could report the Bonferroni version (i.e. just correcting for N SNPs) as my impression is that this is what is usually done but we can note that the power for Bonffull will be lower than this.
+
+
+```{r summarise_combos}
+
+my_summary_new<-function(bigsummary=test_combos)
+{
+  by_N_neff_nsub <- bigsummary %>% group_by(nsub,nsnp,nsnpeff,effsize,PhenoCorr)
+  #this means that when summarising, will group by these columns
+  groupedsummary_new<-by_N_neff_nsub %>% summarise(power = mean(Bonferroni))
+
+ groupedsummary_new$Nsnpeffplot<-groupedsummary_new$nsnpeff
+  groupedsummary_new$Nsnpfac<-as.factor(groupedsummary_new$nsnp)
+  groupedsummary_new$nsub<-as.factor(groupedsummary_new$nsub)
+  groupedsummary_new$PhenoCorr<-as.factor(groupedsummary_new$PhenoCorr)
+  groupedsummary_new$effsize<-as.factor(groupedsummary_new$effsize)
+  levels(groupedsummary_new$effsize)<-c("r = .1","r = .15","r = .2")
+  levels(groupedsummary_new$Nsnpfac)<-c("20 SNPs","40 SNPs")
+  groupedsummary_new$power<-100*groupedsummary_new$power
+  return(groupedsummary_new)
+}
+```
+
+```{r doplots}
+groupedsummary_new <- my_summary_new(test_combos)
+
+# The palette with black:
+cbbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00")
+
+# To use for line and point colors, add
+
+png(paste0(myaddress,'July2019/DB_plots/PLINK_Random_nrun',nrun,'.png'))
+ggplot(groupedsummary_new,aes(x=Nsnpeffplot,y=power,colour=PhenoCorr,shape=nsub))+
+  geom_point()+
+  geom_line()+
+  facet_grid(Nsnpfac~effsize)+
+  theme_bw()+
+  theme(legend.position = "bottom")+ 
+  guides(colour = guide_legend(nrow = 2))+
+  scale_colour_manual(values=cbbPalette)+ guides(colour=guide_legend(title="Phenotype\n intercorrelation"),shape=guide_legend(title="N"))+
+  ylab("Power") +
+  xlab("Number of SNPs with an effect")
+dev.off()
+
+```
