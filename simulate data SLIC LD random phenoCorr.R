@@ -348,6 +348,10 @@ my_summary_new<-function(bigsummary=bigsummary)
   groupedsummary_new$Ngenes<-as.factor(groupedsummary_new$Ngenes)
   groupedsummary_new$nsub<-as.factor(groupedsummary_new$nsub)
   groupedsummary_new$PhenoCorr<-as.factor(groupedsummary_new$PhenoCorr)
+  groupedsummary_new$effsize<-as.factor(groupedsummary_new$effsize)
+  levels(groupedsummary_new$effsize)<-c("r = .1","r = .15","r = .2")
+  levels(groupedsummary_new$Nsnpfac)<-c("20 SNPs","40 SNPs")
+  groupedsummary_new$power<-100*groupedsummary_new$power
   return(groupedsummary_new)
 }
 
@@ -358,8 +362,8 @@ cbbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00"
 
 # To use for line and point colors, add
 
-png(paste0(mypath,"SLIC_LD_pheno_random_pattern_negatives_01_plot.png"))
-ggplot(groupedsummary_new,aes(x=Nsnpeffplot,y=power,colour=PhenoCorr,shape=nsub))+geom_point()+geom_line()+facet_grid(Nsnpfac~effsize)+theme_bw()+theme(legend.position = "bottom")+ guides(colour = guide_legend(nrow = 2))+scale_colour_manual(values=cbbPalette)
+tiff(paste0(mypath,"SLIC_LD_pheno_random_pattern_negatives_01_plot.tiff"),width=2400,height=2000,res = 400)
+ggplot(groupedsummary_new,aes(x=Nsnpeffplot,y=power,colour=PhenoCorr))+geom_point()+geom_line()+facet_grid(Nsnpfac~effsize)+theme_bw()+theme(legend.position = "bottom")+ guides(colour = guide_legend(nrow = 2))+scale_colour_manual(values=cbbPalette)+ guides(colour=guide_legend(title="Phenotype intercorrelation"))+ylab("Power") +xlab("Number of SNPs with an effect")
 dev.off()
 
 #--------------------------------------------------------------------------------------------------#
